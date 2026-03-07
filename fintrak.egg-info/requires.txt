@@ -1,0 +1,6 @@
+click>=8.0
+rich>=13.0
+pandas>=2.0
+textual>=1.0
+textual-autocomplete>=4.0
+numbers-parser>=4.0

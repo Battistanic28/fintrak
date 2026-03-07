@@ -1,0 +1,2 @@
+[console_scripts]
+fintrak = fintrak.cli:cli

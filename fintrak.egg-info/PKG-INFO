@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: fintrak
+Version: 0.1.0
+Summary: Personal finance CLI toolkit — track credit card spending via CSV imports
+Requires-Python: >=3.10
+Requires-Dist: click>=8.0
+Requires-Dist: rich>=13.0
+Requires-Dist: pandas>=2.0
+Requires-Dist: textual>=1.0
+Requires-Dist: textual-autocomplete>=4.0
+Requires-Dist: numbers-parser>=4.0

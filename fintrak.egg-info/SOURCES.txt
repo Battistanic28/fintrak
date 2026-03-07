@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+fintrak/__init__.py
+fintrak/analysis.py
+fintrak/cli.py
+fintrak/db.py
+fintrak/display.py
+fintrak/importer.py
+fintrak/tui.py
+fintrak.egg-info/PKG-INFO
+fintrak.egg-info/SOURCES.txt
+fintrak.egg-info/dependency_links.txt
+fintrak.egg-info/entry_points.txt
+fintrak.egg-info/requires.txt
+fintrak.egg-info/top_level.txt
