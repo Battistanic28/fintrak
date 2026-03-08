@@ -415,12 +415,13 @@ class TransactionFilters(Static):
         width: 28;
         margin: 0 3 0 0;
     }
-    TransactionFilters Input {
-        width: 18;
+    TransactionFilters #txn-month-filter, TransactionFilters #txn-year-filter {
+        width: 20;
         margin: 0 2 0 0;
     }
-    TransactionFilters #txn-desc-filter {
+    TransactionFilters Input {
         width: 40;
+        margin: 0 2 0 0;
     }
     TransactionFilters Button {
         min-width: 10;
@@ -448,10 +449,20 @@ class TransactionFilters(Static):
             yield Label("Description:")
             yield Input(placeholder="Search descriptions...", id="txn-desc-filter")
         with Horizontal(classes="filter-row"):
-            yield Label("From:")
-            yield Input(placeholder="YYYY-MM-DD", id="txn-date-from")
-            yield Label("To:")
-            yield Input(placeholder="YYYY-MM-DD", id="txn-date-to")
+            yield Label("Month:")
+            yield Select(
+                [("All Months", "")],
+                value="",
+                id="txn-month-filter",
+                allow_blank=False,
+            )
+            yield Label("Year:")
+            yield Select(
+                [("All Years", "")],
+                value="",
+                id="txn-year-filter",
+                allow_blank=False,
+            )
             yield Button("Apply", variant="primary", id="btn-txn-apply")
             yield Button("Clear", variant="default", id="btn-txn-clear")
 
@@ -563,8 +574,8 @@ class FintrakApp(App):
         self.txn_card_filter: str = ""
         self.txn_category_filter: str = ""
         self.txn_desc_filter: str = ""
-        self.txn_date_from: str = ""
-        self.txn_date_to: str = ""
+        self.txn_month_filter: str = ""
+        self.txn_year_filter: str = ""
         self.pnl_month: str = datetime.now().strftime("%Y-%m")
 
     def compose(self) -> ComposeResult:
@@ -648,11 +659,17 @@ class FintrakApp(App):
         pnl_table.cursor_type = "row"
         pnl_table.add_columns("Line Item", "Amount")
 
+    MONTH_NAMES = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ]
+
     def _populate_txn_filters(self) -> None:
         conn = get_connection()
         cards = get_cards(conn)
         categories = get_categories(conn)
         descriptions = get_descriptions(conn)
+        available_months = get_available_months(conn)
         conn.close()
 
         card_options = [("All Cards", "")]
@@ -663,11 +680,31 @@ class FintrakApp(App):
         for cat in categories:
             cat_options.append((cat, cat))
 
-        card_select = self.query_one("#txn-card-filter", Select)
-        card_select.set_options(card_options)
+        month_options = [("All Months", "")]
+        for i, name in enumerate(self.MONTH_NAMES, 1):
+            month_options.append((name, str(i).zfill(2)))
 
-        cat_select = self.query_one("#txn-category-filter", Select)
-        cat_select.set_options(cat_options)
+        years = sorted({m[:4] for m in available_months}, reverse=True)
+        year_options = [("All Years", "")]
+        for y in years:
+            year_options.append((y, y))
+
+        with self.prevent(Select.Changed):
+            card_select = self.query_one("#txn-card-filter", Select)
+            card_select.set_options(card_options)
+
+            cat_select = self.query_one("#txn-category-filter", Select)
+            cat_select.set_options(cat_options)
+
+            month_select = self.query_one("#txn-month-filter", Select)
+            month_select.set_options(month_options)
+            if self.txn_month_filter:
+                month_select.value = self.txn_month_filter
+
+            year_select = self.query_one("#txn-year-filter", Select)
+            year_select.set_options(year_options)
+            if self.txn_year_filter:
+                year_select.value = self.txn_year_filter
 
         self._desc_candidates = [DropdownItem(d) for d in descriptions]
 
@@ -724,13 +761,21 @@ class FintrakApp(App):
     def _refresh_transactions(self) -> None:
         conn = get_connection()
         card_id = int(self.txn_card_filter) if self.txn_card_filter else None
+
+        # Build month filter from year/month selects
+        month = None
+        if self.txn_year_filter and self.txn_month_filter:
+            month = f"{self.txn_year_filter}-{self.txn_month_filter}"
+        elif self.txn_year_filter:
+            month = self.txn_year_filter
+        # month-only without year: not filtered by date (show all instances)
+
         txns = get_transactions(
             conn,
             card_id=card_id,
+            month=month,
             category=self.txn_category_filter or None,
             description=self.txn_desc_filter or None,
-            date_from=self.txn_date_from or None,
-            date_to=self.txn_date_to or None,
         )
         conn.close()
 
@@ -886,14 +931,18 @@ class FintrakApp(App):
     def on_txn_category_changed(self, event: Select.Changed) -> None:
         self.txn_category_filter = str(event.value) if event.value != Select.BLANK else ""
 
+    @on(Select.Changed, "#txn-month-filter")
+    def on_txn_month_changed(self, event: Select.Changed) -> None:
+        self.txn_month_filter = str(event.value) if event.value != Select.BLANK else ""
+
+    @on(Select.Changed, "#txn-year-filter")
+    def on_txn_year_changed(self, event: Select.Changed) -> None:
+        self.txn_year_filter = str(event.value) if event.value != Select.BLANK else ""
+
     @on(Button.Pressed, "#btn-txn-apply")
-    @on(Input.Submitted, "#txn-date-from")
-    @on(Input.Submitted, "#txn-date-to")
     @on(Input.Submitted, "#txn-desc-filter")
     def on_txn_apply(self) -> None:
         self.txn_desc_filter = self.query_one("#txn-desc-filter", Input).value.strip()
-        self.txn_date_from = self.query_one("#txn-date-from", Input).value.strip()
-        self.txn_date_to = self.query_one("#txn-date-to", Input).value.strip()
         self._refresh_transactions()
 
     @on(Button.Pressed, "#btn-txn-clear")
@@ -901,13 +950,14 @@ class FintrakApp(App):
         self.txn_card_filter = ""
         self.txn_category_filter = ""
         self.txn_desc_filter = ""
-        self.txn_date_from = ""
-        self.txn_date_to = ""
-        self.query_one("#txn-card-filter", Select).value = ""
-        self.query_one("#txn-category-filter", Select).value = ""
+        self.txn_month_filter = ""
+        self.txn_year_filter = ""
+        with self.prevent(Select.Changed):
+            self.query_one("#txn-card-filter", Select).value = ""
+            self.query_one("#txn-category-filter", Select).value = ""
+            self.query_one("#txn-month-filter", Select).value = ""
+            self.query_one("#txn-year-filter", Select).value = ""
         self.query_one("#txn-desc-filter", Input).value = ""
-        self.query_one("#txn-date-from", Input).value = ""
-        self.query_one("#txn-date-to", Input).value = ""
         self._refresh_transactions()
 
     @on(Select.Changed, "#pnl-month-select")
