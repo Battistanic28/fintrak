@@ -60,8 +60,6 @@ def print_summary(summary):
     table.add_column("Metric", style="cyan bold")
     table.add_column("Value", justify="right")
     table.add_row("Total Spent", f"[red]${summary['total_spent']:,.2f}[/red]")
-    table.add_row("Total Payments/Credits", f"[green]${summary['total_payments']:,.2f}[/green]")
-    table.add_row("Net", f"${summary['net']:,.2f}")
     table.add_row("Transactions", str(summary["transaction_count"]))
     table.add_row("Avg Transaction", f"${summary['avg_transaction']:,.2f}")
     console.print(table)

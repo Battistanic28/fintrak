@@ -6,11 +6,8 @@ def spending_summary(transactions):
         return None
     df = _to_dataframe(transactions)
     charges = df[df["amount"] > 0]
-    payments = df[df["amount"] < 0]
     return {
         "total_spent": round(charges["amount"].sum(), 2),
-        "total_payments": round(payments["amount"].sum(), 2),
-        "net": round(df["amount"].sum(), 2),
         "transaction_count": len(df),
         "avg_transaction": round(charges["amount"].mean(), 2) if len(charges) else 0,
     }

@@ -370,12 +370,6 @@ class FintrakApp(App):
     .stat-spent {
         border: tall $error;
     }
-    .stat-payments {
-        border: tall $success;
-    }
-    .stat-net {
-        border: tall $warning;
-    }
     #txn-total {
         height: 1;
         margin: 0 1 1 1;
@@ -450,8 +444,6 @@ class FintrakApp(App):
                 yield DateRangeFilter(id="dash-filter")
                 with Horizontal(id="stats-row"):
                     yield StatCard("Total Spent", "$0.00", "stat-spent")
-                    yield StatCard("Payments / Credits", "$0.00", "stat-payments")
-                    yield StatCard("Net", "$0.00", "stat-net")
                     yield StatCard("Transactions", "0")
                 with VerticalScroll(id="dashboard-content"):
                     with Vertical(id="categories-box"):
@@ -542,19 +534,15 @@ class FintrakApp(App):
 
         stat_cards = self.query(StatCard)
         stats = spending_summary(txns)
-        if stats and len(list(stat_cards)) >= 4:
+        if stats and len(list(stat_cards)) >= 2:
             cards_list = list(self.query(StatCard))
             cards_list[0].update_stat("Total Spent", f"[red]${stats['total_spent']:,.2f}[/red]")
-            cards_list[1].update_stat("Payments / Credits", f"[green]${stats['total_payments']:,.2f}[/green]")
-            cards_list[2].update_stat("Net", f"${stats['net']:,.2f}")
-            cards_list[3].update_stat("Transactions", str(stats["transaction_count"]))
+            cards_list[1].update_stat("Transactions", str(stats["transaction_count"]))
         else:
             cards_list = list(self.query(StatCard))
-            if len(cards_list) >= 4:
+            if len(cards_list) >= 2:
                 cards_list[0].update_stat("Total Spent", "$0.00")
-                cards_list[1].update_stat("Payments / Credits", "$0.00")
-                cards_list[2].update_stat("Net", "$0.00")
-                cards_list[3].update_stat("Transactions", "0")
+                cards_list[1].update_stat("Transactions", "0")
 
         cats_box = self.query_one("#categories-box", Vertical)
         for bar in self.query(CategoryBar):
@@ -598,7 +586,8 @@ class FintrakApp(App):
         total = 0.0
         for t in txns:
             amt = t["amount"]
-            total += amt
+            if amt > 0:
+                total += amt
             amt_str = f"${amt:,.2f}" if amt >= 0 else f"-${abs(amt):,.2f}"
             table.add_row(
                 t["date"],
