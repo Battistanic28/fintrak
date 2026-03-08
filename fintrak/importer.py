@@ -42,6 +42,15 @@ PROFILES = {
             "credit": "Credit",
         },
     },
+    "us_bank": {
+        "columns": {"Transaction", "Amount", "Category"},
+        "map": {
+            "amount": "Amount",
+            "category": "Category",
+        },
+        "parse_transaction": True,  # date & description packed in Transaction column
+        "negate": False,
+    },
 }
 
 SUPPORTED_EXTENSIONS = {".csv", ".numbers"}
@@ -76,11 +85,24 @@ def parse_amount(value):
     return float(cleaned)
 
 
+def _parse_usbank_transaction(value):
+    """Parse US Bank Transaction field: 'date,type,description,reference'."""
+    parts = str(value).split(",", 3)
+    date = parts[0].strip() if len(parts) > 0 else ""
+    # parts[1] is type (DEBIT/CREDIT) — skip
+    description = parts[2].strip() if len(parts) > 2 else ""
+    return date, description
+
+
 def extract_row(row, profile):
     m = profile["map"]
 
-    date = parse_date(row[m["date"]])
-    description = str(row[m["description"]]).strip()
+    if profile.get("parse_transaction"):
+        raw_date, description = _parse_usbank_transaction(row["Transaction"])
+        date = parse_date(raw_date)
+    else:
+        date = parse_date(row[m["date"]])
+        description = str(row[m["description"]]).strip()
     category = str(row[m["category"]]).strip() if m.get("category") and m["category"] in row and row[m["category"]] else None
 
     if "debit" in m:

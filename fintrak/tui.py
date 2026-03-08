@@ -538,6 +538,7 @@ class FintrakApp(App):
     }
     #pnl-table {
         width: 1fr;
+        height: 1fr;
         margin: 1;
     }
     #txn-total {
