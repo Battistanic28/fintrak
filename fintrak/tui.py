@@ -551,9 +551,9 @@ class FintrakApp(App):
         Binding("r", "refresh_data", "Refresh"),
         Binding("q", "quit", "Quit"),
         Binding("1", "tab_dashboard", "Dashboard", show=False),
-        Binding("2", "tab_transactions", "Transactions", show=False),
-        Binding("3", "tab_imports", "Imports", show=False),
-        Binding("4", "tab_pnl", "P&L", show=False),
+        Binding("2", "tab_pnl", "P&L", show=False),
+        Binding("3", "tab_transactions", "Transactions", show=False),
+        Binding("4", "tab_imports", "Imports", show=False),
     ]
 
     FILTER_MTD = "mtd"
@@ -609,12 +609,6 @@ class FintrakApp(App):
                     with Vertical(id="categories-box"):
                         yield Static("Spending by Category", classes="category-title")
                     yield DataTable(id="recent-table")
-            with TabPane("Transactions", id="tab-transactions"):
-                yield TransactionFilters(id="txn-filters")
-                yield DataTable(id="txn-table")
-                yield Static("", id="txn-total")
-            with TabPane("Imports", id="tab-imports"):
-                yield DataTable(id="import-table")
             with TabPane("P&L", id="tab-pnl"):
                 with Horizontal(id="pnl-month-row"):
                     yield Label("Month:")
@@ -633,6 +627,12 @@ class FintrakApp(App):
                     yield Button("Add Income", variant="success", id="btn-add-income")
                     yield Button("Add Expense", variant="warning", id="btn-add-expense")
                 yield DataTable(id="pnl-table")
+            with TabPane("Transactions", id="tab-transactions"):
+                yield TransactionFilters(id="txn-filters")
+                yield DataTable(id="txn-table")
+                yield Static("", id="txn-total")
+            with TabPane("Imports", id="tab-imports"):
+                yield DataTable(id="import-table")
         yield Static("", id="toast-bar")
         yield Footer()
 
