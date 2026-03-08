@@ -50,10 +50,16 @@ def _create_tables(conn):
             name        TEXT NOT NULL,
             amount      REAL NOT NULL,
             type        TEXT NOT NULL CHECK(type IN ('income', 'expense')),
+            paid_via_cc INTEGER NOT NULL DEFAULT 0,
             created_at  TEXT DEFAULT (datetime('now')),
             updated_at  TEXT DEFAULT (datetime('now'))
         );
     """)
+    # Migration: add paid_via_cc if missing (existing installs)
+    try:
+        conn.execute("SELECT paid_via_cc FROM recurring_items LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE recurring_items ADD COLUMN paid_via_cc INTEGER NOT NULL DEFAULT 0")
     conn.commit()
 
 
@@ -157,19 +163,19 @@ def get_categories(conn):
     return [r["category"] for r in rows]
 
 
-def add_recurring_item(conn, name, amount, item_type):
+def add_recurring_item(conn, name, amount, item_type, paid_via_cc=False):
     cur = conn.execute(
-        "INSERT INTO recurring_items (name, amount, type) VALUES (?, ?, ?)",
-        (name, amount, item_type),
+        "INSERT INTO recurring_items (name, amount, type, paid_via_cc) VALUES (?, ?, ?, ?)",
+        (name, amount, item_type, int(paid_via_cc)),
     )
     conn.commit()
     return cur.lastrowid
 
 
-def update_recurring_item(conn, item_id, name, amount, item_type):
+def update_recurring_item(conn, item_id, name, amount, item_type, paid_via_cc=False):
     conn.execute(
-        "UPDATE recurring_items SET name = ?, amount = ?, type = ?, updated_at = datetime('now') WHERE id = ?",
-        (name, amount, item_type, item_id),
+        "UPDATE recurring_items SET name = ?, amount = ?, type = ?, paid_via_cc = ?, updated_at = datetime('now') WHERE id = ?",
+        (name, amount, item_type, int(paid_via_cc), item_id),
     )
     conn.commit()
 

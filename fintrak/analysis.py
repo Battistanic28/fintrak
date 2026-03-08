@@ -50,7 +50,7 @@ def profit_loss(recurring_items, card_spending_rows):
         entry = {"id": item["id"], "name": item["name"], "amount": round(item["amount"], 2)}
         if item["type"] == "income":
             income_items.append(entry)
-        else:
+        elif not item["paid_via_cc"]:
             recurring_expense_items.append(entry)
 
     card_expense_items = [

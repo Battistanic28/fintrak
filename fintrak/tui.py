@@ -218,29 +218,31 @@ class RecurringItemModal(ModalScreen[str]):
     }
     """
 
-    def __init__(self, item_id: int | None = None, name: str = "", amount: str = "", item_type: str = "income") -> None:
+    def __init__(self, item_id: int | None = None, name: str = "", amount: str = "", item_type: str = "income", paid_via_cc: bool = False) -> None:
         super().__init__()
         self.item_id = item_id
         self._name = name
         self._amount = amount
         self._item_type = item_type
+        self._paid_via_cc = paid_via_cc
 
     def compose(self) -> ComposeResult:
         editing = self.item_id is not None
-        title = "Edit Recurring Item" if editing else "Add Recurring Item"
+        title = "Edit Item" if editing else "Add Item"
         with Vertical(id="recurring-dialog"):
             yield Label(f"[b]{title}[/b]")
             yield Label("Name:")
             yield Input(value=self._name, placeholder="e.g. Salary, Rent, Internet", id="recurring-name")
             yield Label("Monthly amount:")
             yield Input(value=self._amount, placeholder="0.00", id="recurring-amount")
-            yield Label("Type:")
-            yield Select(
-                [("Income", "income"), ("Expense", "expense")],
-                value=self._item_type,
-                id="recurring-type",
-                allow_blank=False,
-            )
+            if self._item_type == "expense":
+                yield Label("Paid via credit card?")
+                yield Select(
+                    [("No", "no"), ("Yes", "yes")],
+                    value="yes" if self._paid_via_cc else "no",
+                    id="recurring-cc",
+                    allow_blank=False,
+                )
             yield Label("", id="recurring-error")
             with Horizontal(id="recurring-buttons"):
                 yield Button("Save", variant="primary", id="btn-recurring-save")
@@ -264,7 +266,7 @@ class RecurringItemModal(ModalScreen[str]):
     def save(self) -> None:
         name = self.query_one("#recurring-name", Input).value.strip()
         amount_str = self.query_one("#recurring-amount", Input).value.strip()
-        item_type = self.query_one("#recurring-type", Select).value
+        item_type = self._item_type
 
         if not name:
             self._show_error("Name is required.")
@@ -277,13 +279,17 @@ class RecurringItemModal(ModalScreen[str]):
             self._show_error("Amount must be a positive number.")
             return
 
+        paid_via_cc = False
+        if self._item_type == "expense":
+            paid_via_cc = self.query_one("#recurring-cc", Select).value == "yes"
+
         conn = get_connection()
         if self.item_id is not None:
-            update_recurring_item(conn, self.item_id, name, amount, item_type)
-            self.dismiss(f"Updated: {name} ${amount:,.2f} ({item_type})")
+            update_recurring_item(conn, self.item_id, name, amount, item_type, paid_via_cc)
+            self.dismiss(f"Updated: {name} ${amount:,.2f}")
         else:
-            add_recurring_item(conn, name, amount, item_type)
-            self.dismiss(f"Added: {name} ${amount:,.2f} ({item_type})")
+            add_recurring_item(conn, name, amount, item_type, paid_via_cc)
+            self.dismiss(f"Added: {name} ${amount:,.2f}")
         conn.close()
 
     @on(Button.Pressed, "#btn-recurring-delete")
@@ -481,9 +487,24 @@ class FintrakApp(App):
         text-style: bold;
         margin-bottom: 1;
     }
-    #txn-table, #import-table, #recent-table {
+    #txn-table, #import-table, #recent-table, #income-table, #expense-table {
         height: 1fr;
         margin: 1;
+    }
+    #income-buttons, #expense-buttons {
+        height: 3;
+        margin: 0 1 0 1;
+        align: left middle;
+    }
+    #income-buttons Button, #expense-buttons Button {
+        margin-right: 1;
+    }
+    #income-total, #expense-total {
+        height: 1;
+        margin: 0 1 1 1;
+        padding: 0 1;
+        text-align: right;
+        text-style: bold;
     }
     .stat-spent {
         border: tall $error;
@@ -520,14 +541,6 @@ class FintrakApp(App):
         height: 1fr;
         margin: 1;
     }
-    #pnl-config-buttons {
-        height: 3;
-        margin: 0 1 0 1;
-        align: left middle;
-    }
-    #pnl-config-buttons Button {
-        margin-right: 1;
-    }
     #txn-total {
         height: 1;
         margin: 0 1 1 1;
@@ -552,8 +565,10 @@ class FintrakApp(App):
         Binding("q", "quit", "Quit"),
         Binding("1", "tab_dashboard", "Dashboard", show=False),
         Binding("2", "tab_pnl", "P&L", show=False),
-        Binding("3", "tab_transactions", "Transactions", show=False),
-        Binding("4", "tab_imports", "Imports", show=False),
+        Binding("3", "tab_income", "Income", show=False),
+        Binding("4", "tab_expenses", "Key Expenses", show=False),
+        Binding("5", "tab_transactions", "Transactions", show=False),
+        Binding("6", "tab_imports", "Imports", show=False),
     ]
 
     FILTER_MTD = "mtd"
@@ -599,7 +614,7 @@ class FintrakApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with TabbedContent("Dashboard", "Transactions", "Imports", "P&L", id="tabs"):
+        with TabbedContent("Dashboard", "Income", "Key Expenses", "P&L", "Transactions", "Imports", id="tabs"):
             with TabPane("Dashboard", id="tab-dashboard"):
                 yield DateRangeFilter(id="dash-filter")
                 with Horizontal(id="stats-row"):
@@ -623,10 +638,17 @@ class FintrakApp(App):
                     yield StatCard("Total Income", "$0.00", "stat-income")
                     yield StatCard("Total Expenses", "$0.00", "stat-expenses")
                     yield StatCard("Net P/L", "$0.00", "stat-net")
-                with Horizontal(id="pnl-config-buttons"):
-                    yield Button("Add Income", variant="success", id="btn-add-income")
-                    yield Button("Add Expense", variant="warning", id="btn-add-expense")
                 yield DataTable(id="pnl-table")
+            with TabPane("Income", id="tab-income"):
+                with Horizontal(id="income-buttons"):
+                    yield Button("Add Income", variant="success", id="btn-add-income")
+                yield DataTable(id="income-table")
+                yield Static("", id="income-total")
+            with TabPane("Key Expenses", id="tab-expenses"):
+                with Horizontal(id="expense-buttons"):
+                    yield Button("Add Expense", variant="warning", id="btn-add-expense")
+                yield DataTable(id="expense-table")
+                yield Static("", id="expense-total")
             with TabPane("Transactions", id="tab-transactions"):
                 yield TransactionFilters(id="txn-filters")
                 yield DataTable(id="txn-table")
@@ -668,6 +690,14 @@ class FintrakApp(App):
         imp_table.cursor_type = "row"
         imp_table.add_columns("ID", "Card", "File", "Format", "Imported", "Skipped", "Date")
 
+        income_table = self.query_one("#income-table", DataTable)
+        income_table.cursor_type = "row"
+        income_table.add_columns("Name", "Amount")
+
+        expense_table = self.query_one("#expense-table", DataTable)
+        expense_table.cursor_type = "row"
+        expense_table.add_columns("Name", "Amount", "Paid via CC")
+
         pnl_table = self.query_one("#pnl-table", DataTable)
         pnl_table.cursor_type = "row"
         pnl_table.add_columns("Line Item", "Amount")
@@ -706,9 +736,53 @@ class FintrakApp(App):
     def _refresh_all(self) -> None:
         self._populate_txn_filters()
         self._refresh_dashboard()
+        self._refresh_income()
+        self._refresh_expenses()
         self._refresh_transactions()
         self._refresh_imports()
         self._refresh_pnl()
+
+    def _refresh_income(self) -> None:
+        conn = get_connection()
+        items = get_recurring_items(conn, item_type="income")
+        conn.close()
+
+        table = self.query_one("#income-table", DataTable)
+        table.clear()
+        total = 0.0
+        for item in items:
+            amt = item["amount"]
+            total += amt
+            table.add_row(
+                item["name"],
+                f"[green]${amt:,.2f}[/green]",
+                key=str(item["id"]),
+            )
+        self.query_one("#income-total", Static).update(
+            f"{len(items)} items    Total: [green]${total:,.2f}[/green]"
+        )
+
+    def _refresh_expenses(self) -> None:
+        conn = get_connection()
+        items = get_recurring_items(conn, item_type="expense")
+        conn.close()
+
+        table = self.query_one("#expense-table", DataTable)
+        table.clear()
+        total = 0.0
+        for item in items:
+            amt = item["amount"]
+            total += amt
+            cc_label = "[yellow]Yes[/yellow]" if item["paid_via_cc"] else "No"
+            table.add_row(
+                item["name"],
+                f"[red]${amt:,.2f}[/red]",
+                cc_label,
+                key=str(item["id"]),
+            )
+        self.query_one("#expense-total", Static).update(
+            f"{len(items)} items    Total: [red]${total:,.2f}[/red]"
+        )
 
     def _refresh_dashboard(self) -> None:
         conn = get_connection()
@@ -893,14 +967,20 @@ class FintrakApp(App):
     def action_tab_dashboard(self) -> None:
         self.query_one(TabbedContent).active = "tab-dashboard"
 
+    def action_tab_income(self) -> None:
+        self.query_one(TabbedContent).active = "tab-income"
+
+    def action_tab_expenses(self) -> None:
+        self.query_one(TabbedContent).active = "tab-expenses"
+
+    def action_tab_pnl(self) -> None:
+        self.query_one(TabbedContent).active = "tab-pnl"
+
     def action_tab_transactions(self) -> None:
         self.query_one(TabbedContent).active = "tab-transactions"
 
     def action_tab_imports(self) -> None:
         self.query_one(TabbedContent).active = "tab-imports"
-
-    def action_tab_pnl(self) -> None:
-        self.query_one(TabbedContent).active = "tab-pnl"
 
     # ── Events ────────────────────────────────────────────────────────────
 
@@ -965,6 +1045,7 @@ class FintrakApp(App):
         def on_dismiss(result: str) -> None:
             if result:
                 self._toast(result)
+                self._refresh_income()
                 self._refresh_pnl()
         self.push_screen(RecurringItemModal(item_type="income"), callback=on_dismiss)
 
@@ -973,17 +1054,22 @@ class FintrakApp(App):
         def on_dismiss(result: str) -> None:
             if result:
                 self._toast(result)
+                self._refresh_expenses()
                 self._refresh_pnl()
         self.push_screen(RecurringItemModal(item_type="expense"), callback=on_dismiss)
 
-    @on(DataTable.RowSelected, "#pnl-table")
-    def on_pnl_row_selected(self, event: DataTable.RowSelected) -> None:
+    @on(DataTable.RowSelected, "#income-table")
+    def on_income_row_selected(self, event: DataTable.RowSelected) -> None:
+        self._edit_recurring_item(event, "income")
+
+    @on(DataTable.RowSelected, "#expense-table")
+    def on_expense_row_selected(self, event: DataTable.RowSelected) -> None:
+        self._edit_recurring_item(event, "expense")
+
+    def _edit_recurring_item(self, event: DataTable.RowSelected, item_type: str) -> None:
         if event.row_key is None:
             return
-        key = event.row_key.value
-        if not key or not key.startswith("item-"):
-            return
-        item_id = int(key.split("-", 1)[1])
+        item_id = int(event.row_key.value)
         conn = get_connection()
         item = get_recurring_item_by_id(conn, item_id)
         conn.close()
@@ -993,6 +1079,10 @@ class FintrakApp(App):
         def on_dismiss(result: str) -> None:
             if result:
                 self._toast(result)
+                if item_type == "income":
+                    self._refresh_income()
+                else:
+                    self._refresh_expenses()
                 self._refresh_pnl()
 
         self.push_screen(
@@ -1001,6 +1091,7 @@ class FintrakApp(App):
                 name=item["name"],
                 amount=str(item["amount"]),
                 item_type=item["type"],
+                paid_via_cc=bool(item["paid_via_cc"]),
             ),
             callback=on_dismiss,
         )
