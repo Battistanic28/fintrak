@@ -9,3 +9,4 @@ Requires-Dist: pandas>=2.0
 Requires-Dist: textual>=1.0
 Requires-Dist: textual-autocomplete>=4.0
 Requires-Dist: numbers-parser>=4.0
+Requires-Dist: openpyxl>=3.1

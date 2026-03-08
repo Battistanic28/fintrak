@@ -514,6 +514,9 @@ class FintrakApp(App):
         width: 20;
         margin-right: 2;
     }
+    #btn-export-pnl {
+        margin-left: 2;
+    }
     #pnl-stats-row {
         height: 5;
         margin: 0 1;
@@ -592,6 +595,7 @@ class FintrakApp(App):
                         id="pnl-month-select",
                         allow_blank=False,
                     )
+                    yield Button("Export", variant="primary", id="btn-export-pnl")
                 with Horizontal(id="pnl-stats-row"):
                     yield StatCard("Total Income", "$0.00", "stat-income")
                     yield StatCard("Total Expenses", "$0.00", "stat-expenses")
@@ -967,6 +971,27 @@ class FintrakApp(App):
         if val and val != self.pnl_month:
             self.pnl_month = val
             self._refresh_pnl()
+
+    @on(Button.Pressed, "#btn-export-pnl")
+    def on_export_pnl(self) -> None:
+        from fintrak.db import get_recurring_items, get_monthly_card_spending, get_monthly_category_spending
+        from fintrak.analysis import profit_loss, expense_breakdown
+        from fintrak.export import export_pnl
+
+        conn = get_connection()
+        items = get_recurring_items(conn)
+        card_spending = get_monthly_card_spending(conn, self.pnl_month)
+        cat_spending = get_monthly_category_spending(conn, self.pnl_month)
+        conn.close()
+
+        pnl = profit_loss(items, card_spending)
+        bd = expense_breakdown(items, cat_spending)
+
+        exports_dir = Path.cwd() / "exports"
+        exports_dir.mkdir(exist_ok=True)
+        output = exports_dir / f"pnl-{self.pnl_month}.xlsx"
+        export_pnl(pnl, bd, self.pnl_month, output)
+        self._toast(f"Exported to {output}")
 
     @on(Button.Pressed, "#btn-add-income")
     def on_add_income(self) -> None:

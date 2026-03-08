@@ -5,6 +5,7 @@ fintrak/analysis.py
 fintrak/cli.py
 fintrak/db.py
 fintrak/display.py
+fintrak/export.py
 fintrak/importer.py
 fintrak/tui.py
 fintrak.egg-info/PKG-INFO

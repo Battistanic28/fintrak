@@ -155,5 +155,35 @@ def undo(import_id, yes):
     conn.close()
 
 
+@cli.command()
+@click.option("--month", default=None, help="Month as YYYY-MM (default: current month)")
+@click.option("--output", "-o", default=None, type=click.Path(path_type=Path), help="Output file path (default: pnl-YYYY-MM.xlsx)")
+def export(month, output):
+    """Export a P&L report as an Excel spreadsheet."""
+    from fintrak.db import get_recurring_items, get_monthly_card_spending, get_monthly_category_spending
+    from fintrak.analysis import profit_loss, expense_breakdown
+    from fintrak.export import export_pnl
+
+    if month is None:
+        month = datetime.now().strftime("%Y-%m")
+
+    if output is None:
+        exports_dir = Path.cwd() / "exports"
+        exports_dir.mkdir(exist_ok=True)
+        output = exports_dir / f"pnl-{month}.xlsx"
+
+    conn = get_connection()
+    items = get_recurring_items(conn)
+    card_spending = get_monthly_card_spending(conn, month)
+    cat_spending = get_monthly_category_spending(conn, month)
+    conn.close()
+
+    pnl = profit_loss(items, card_spending)
+    bd = expense_breakdown(items, cat_spending)
+
+    result = export_pnl(pnl, bd, month, output)
+    console.print(f"[green]Exported:[/green] {result}")
+
+
 if __name__ == "__main__":
     cli()
