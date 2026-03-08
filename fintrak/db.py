@@ -165,7 +165,10 @@ def get_transactions(conn, card_id=None, month=None, category=None, description=
         params.append(category)
     if description:
         query += " AND t.description LIKE ?"
-        params.append(f"%{description}%")
+        if "*" in description:
+            params.append(description.replace("*", "%"))
+        else:
+            params.append(f"%{description}%")
     if date_from:
         query += " AND t.date >= ?"
         params.append(date_from)
