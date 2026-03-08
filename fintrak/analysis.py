@@ -43,6 +43,38 @@ def top_merchants(transactions, n=10):
     return grouped.to_dict("records")
 
 
+def profit_loss(recurring_items, card_spending_rows):
+    income_items = []
+    recurring_expense_items = []
+    for item in recurring_items:
+        entry = {"id": item["id"], "name": item["name"], "amount": round(item["amount"], 2)}
+        if item["type"] == "income":
+            income_items.append(entry)
+        else:
+            recurring_expense_items.append(entry)
+
+    card_expense_items = [
+        {"card": f"****{row['card_last4']}", "amount": round(row["total_spent"], 2)}
+        for row in card_spending_rows
+    ]
+
+    total_income = round(sum(i["amount"] for i in income_items), 2)
+    total_recurring = round(sum(e["amount"] for e in recurring_expense_items), 2)
+    total_cards = round(sum(c["amount"] for c in card_expense_items), 2)
+    total_expenses = round(total_recurring + total_cards, 2)
+
+    return {
+        "income_items": income_items,
+        "total_income": total_income,
+        "recurring_expense_items": recurring_expense_items,
+        "total_recurring_expenses": total_recurring,
+        "card_expense_items": card_expense_items,
+        "total_card_expenses": total_cards,
+        "total_expenses": total_expenses,
+        "net": round(total_income - total_expenses, 2),
+    }
+
+
 def _to_dataframe(transactions):
     rows = [dict(t) for t in transactions]
     df = pd.DataFrame(rows)

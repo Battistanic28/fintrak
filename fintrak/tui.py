@@ -19,9 +19,12 @@ from fintrak.db import (
     get_transactions, get_earliest_transaction_date,
     get_categories, get_descriptions,
     get_imports, get_import_by_id, delete_import,
+    add_recurring_item, update_recurring_item, delete_recurring_item,
+    get_recurring_items, get_recurring_item_by_id,
+    get_monthly_card_spending, get_available_months,
 )
 from fintrak.importer import parse_csv
-from fintrak.analysis import spending_summary, by_category, top_merchants
+from fintrak.analysis import spending_summary, by_category, top_merchants, profit_loss
 
 
 # ── Import Modal ──────────────────────────────────────────────────────────────
@@ -177,6 +180,121 @@ class UndoModal(ModalScreen[bool]):
     @on(Button.Pressed, "#btn-confirm-undo")
     def confirm(self) -> None:
         self.dismiss(True)
+
+
+# ── Recurring Item Modal ──────────────────────────────────────────────────────
+
+class RecurringItemModal(ModalScreen[str]):
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    DEFAULT_CSS = """
+    RecurringItemModal {
+        align: center middle;
+    }
+    RecurringItemModal > #recurring-dialog {
+        width: 60;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    RecurringItemModal #recurring-dialog Label {
+        margin-bottom: 1;
+    }
+    RecurringItemModal #recurring-dialog Input, RecurringItemModal #recurring-dialog Select {
+        margin-bottom: 1;
+    }
+    RecurringItemModal #recurring-buttons {
+        height: 3;
+        align: right middle;
+    }
+    RecurringItemModal #recurring-buttons Button {
+        margin-left: 1;
+    }
+    RecurringItemModal #recurring-error {
+        color: $error;
+        margin-bottom: 1;
+        display: none;
+    }
+    """
+
+    def __init__(self, item_id: int | None = None, name: str = "", amount: str = "", item_type: str = "income") -> None:
+        super().__init__()
+        self.item_id = item_id
+        self._name = name
+        self._amount = amount
+        self._item_type = item_type
+
+    def compose(self) -> ComposeResult:
+        editing = self.item_id is not None
+        title = "Edit Recurring Item" if editing else "Add Recurring Item"
+        with Vertical(id="recurring-dialog"):
+            yield Label(f"[b]{title}[/b]")
+            yield Label("Name:")
+            yield Input(value=self._name, placeholder="e.g. Salary, Rent, Internet", id="recurring-name")
+            yield Label("Monthly amount:")
+            yield Input(value=self._amount, placeholder="0.00", id="recurring-amount")
+            yield Label("Type:")
+            yield Select(
+                [("Income", "income"), ("Expense", "expense")],
+                value=self._item_type,
+                id="recurring-type",
+                allow_blank=False,
+            )
+            yield Label("", id="recurring-error")
+            with Horizontal(id="recurring-buttons"):
+                yield Button("Save", variant="primary", id="btn-recurring-save")
+                if editing:
+                    yield Button("Delete", variant="error", id="btn-recurring-delete")
+                yield Button("Cancel", variant="default", id="btn-recurring-cancel")
+
+    def _show_error(self, msg: str) -> None:
+        err = self.query_one("#recurring-error", Label)
+        err.update(msg)
+        err.styles.display = "block"
+
+    @on(Button.Pressed, "#btn-recurring-cancel")
+    def cancel(self) -> None:
+        self.dismiss("")
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+    @on(Button.Pressed, "#btn-recurring-save")
+    def save(self) -> None:
+        name = self.query_one("#recurring-name", Input).value.strip()
+        amount_str = self.query_one("#recurring-amount", Input).value.strip()
+        item_type = self.query_one("#recurring-type", Select).value
+
+        if not name:
+            self._show_error("Name is required.")
+            return
+        try:
+            amount = round(float(amount_str), 2)
+            if amount <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            self._show_error("Amount must be a positive number.")
+            return
+
+        conn = get_connection()
+        if self.item_id is not None:
+            update_recurring_item(conn, self.item_id, name, amount, item_type)
+            self.dismiss(f"Updated: {name} ${amount:,.2f} ({item_type})")
+        else:
+            add_recurring_item(conn, name, amount, item_type)
+            self.dismiss(f"Added: {name} ${amount:,.2f} ({item_type})")
+        conn.close()
+
+    @on(Button.Pressed, "#btn-recurring-delete")
+    def delete(self) -> None:
+        if self.item_id is not None:
+            conn = get_connection()
+            item = get_recurring_item_by_id(conn, self.item_id)
+            delete_recurring_item(conn, self.item_id)
+            conn.close()
+            name = item["name"] if item else "item"
+            self.dismiss(f"Deleted: {name}")
 
 
 # ── Stat Widget ───────────────────────────────────────────────────────────────
@@ -370,6 +488,46 @@ class FintrakApp(App):
     .stat-spent {
         border: tall $error;
     }
+    #pnl-month-row {
+        height: 3;
+        margin: 1 1 0 1;
+        align: left middle;
+    }
+    #pnl-month-row Label {
+        width: auto;
+        height: 3;
+        content-align: left middle;
+        margin-right: 1;
+    }
+    #pnl-month-row Select {
+        width: 20;
+        margin-right: 2;
+    }
+    #pnl-stats-row {
+        height: 5;
+        margin: 0 1;
+    }
+    .stat-income {
+        border: tall $success;
+    }
+    .stat-expenses {
+        border: tall $error;
+    }
+    .stat-net {
+        border: tall $warning;
+    }
+    #pnl-table {
+        height: 1fr;
+        margin: 1;
+    }
+    #pnl-config-buttons {
+        height: 3;
+        margin: 0 1 0 1;
+        align: left middle;
+    }
+    #pnl-config-buttons Button {
+        margin-right: 1;
+    }
     #txn-total {
         height: 1;
         margin: 0 1 1 1;
@@ -395,6 +553,7 @@ class FintrakApp(App):
         Binding("1", "tab_dashboard", "Dashboard", show=False),
         Binding("2", "tab_transactions", "Transactions", show=False),
         Binding("3", "tab_imports", "Imports", show=False),
+        Binding("4", "tab_pnl", "P&L", show=False),
     ]
 
     FILTER_MTD = "mtd"
@@ -409,6 +568,7 @@ class FintrakApp(App):
         self.txn_desc_filter: str = ""
         self.txn_date_from: str = ""
         self.txn_date_to: str = ""
+        self.pnl_month: str = datetime.now().strftime("%Y-%m")
 
     def _get_filter_month(self) -> str:
         now = datetime.now()
@@ -439,7 +599,7 @@ class FintrakApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with TabbedContent("Dashboard", "Transactions", "Imports", id="tabs"):
+        with TabbedContent("Dashboard", "Transactions", "Imports", "P&L", id="tabs"):
             with TabPane("Dashboard", id="tab-dashboard"):
                 yield DateRangeFilter(id="dash-filter")
                 with Horizontal(id="stats-row"):
@@ -455,6 +615,24 @@ class FintrakApp(App):
                 yield Static("", id="txn-total")
             with TabPane("Imports", id="tab-imports"):
                 yield DataTable(id="import-table")
+            with TabPane("P&L", id="tab-pnl"):
+                with Horizontal(id="pnl-month-row"):
+                    yield Label("Month:")
+                    current_month = datetime.now().strftime("%Y-%m")
+                    yield Select(
+                        [(current_month, current_month)],
+                        value=current_month,
+                        id="pnl-month-select",
+                        allow_blank=False,
+                    )
+                with Horizontal(id="pnl-stats-row"):
+                    yield StatCard("Total Income", "$0.00", "stat-income")
+                    yield StatCard("Total Expenses", "$0.00", "stat-expenses")
+                    yield StatCard("Net P/L", "$0.00", "stat-net")
+                with Horizontal(id="pnl-config-buttons"):
+                    yield Button("Add Income", variant="success", id="btn-add-income")
+                    yield Button("Add Expense", variant="warning", id="btn-add-expense")
+                yield DataTable(id="pnl-table")
         yield Static("", id="toast-bar")
         yield Footer()
 
@@ -489,6 +667,10 @@ class FintrakApp(App):
         imp_table = self.query_one("#import-table", DataTable)
         imp_table.cursor_type = "row"
         imp_table.add_columns("ID", "Card", "File", "Format", "Imported", "Skipped", "Date")
+
+        pnl_table = self.query_one("#pnl-table", DataTable)
+        pnl_table.cursor_type = "row"
+        pnl_table.add_columns("Line Item", "Amount")
 
     def _update_filter_buttons(self) -> None:
         range_text = self._get_date_range_text()
@@ -526,6 +708,7 @@ class FintrakApp(App):
         self._refresh_dashboard()
         self._refresh_transactions()
         self._refresh_imports()
+        self._refresh_pnl()
 
     def _refresh_dashboard(self) -> None:
         conn = get_connection()
@@ -622,6 +805,74 @@ class FintrakApp(App):
                 key=str(imp["id"]),
             )
 
+    def _refresh_pnl(self) -> None:
+        conn = get_connection()
+        months = get_available_months(conn)
+        current = datetime.now().strftime("%Y-%m")
+        if current not in months:
+            months.insert(0, current)
+
+        month_select = self.query_one("#pnl-month-select", Select)
+        month_options = [(m, m) for m in months]
+        with self.prevent(Select.Changed):
+            month_select.set_options(month_options)
+            if self.pnl_month in months:
+                month_select.value = self.pnl_month
+            elif months:
+                self.pnl_month = months[0]
+                month_select.value = months[0]
+
+        items = get_recurring_items(conn)
+        card_spending = get_monthly_card_spending(conn, self.pnl_month)
+        conn.close()
+
+        pnl = profit_loss(items, card_spending)
+
+        # Update stat cards in the P&L tab
+        pnl_stats = list(self.query_one("#pnl-stats-row", Horizontal).query(StatCard))
+        if len(pnl_stats) >= 3:
+            pnl_stats[0].update_stat("Total Income", f"[green]${pnl['total_income']:,.2f}[/green]")
+            pnl_stats[1].update_stat("Total Expenses", f"[red]${pnl['total_expenses']:,.2f}[/red]")
+            net = pnl["net"]
+            net_color = "green" if net >= 0 else "red"
+            net_sign = "" if net >= 0 else "-"
+            pnl_stats[2].update_stat("Net P/L", f"[{net_color}]{net_sign}${abs(net):,.2f}[/{net_color}]")
+
+        # Populate P&L table
+        table = self.query_one("#pnl-table", DataTable)
+        table.clear()
+
+        # Income section
+        table.add_row("[bold cyan]INCOME[/bold cyan]", "", key="header-income")
+        for item in pnl["income_items"]:
+            table.add_row(f"  {item['name']}", f"[green]${item['amount']:,.2f}[/green]", key=f"item-{item['id']}")
+        table.add_row("[dim]  Subtotal[/dim]", f"[green bold]${pnl['total_income']:,.2f}[/green bold]", key="subtotal-income")
+        table.add_row("", "", key="spacer-1")
+
+        # Recurring expenses section
+        table.add_row("[bold cyan]EXPENSES — Recurring[/bold cyan]", "", key="header-recurring")
+        for item in pnl["recurring_expense_items"]:
+            table.add_row(f"  {item['name']}", f"[red]${item['amount']:,.2f}[/red]", key=f"item-{item['id']}")
+        table.add_row("[dim]  Subtotal[/dim]", f"[red]${pnl['total_recurring_expenses']:,.2f}[/red]", key="subtotal-recurring")
+        table.add_row("", "", key="spacer-2")
+
+        # Card expenses section
+        table.add_row("[bold cyan]EXPENSES — Credit Cards[/bold cyan]", "", key="header-cards")
+        for item in pnl["card_expense_items"]:
+            table.add_row(f"  {item['card']}", f"[red]${item['amount']:,.2f}[/red]", key=f"card-{item['card']}")
+        table.add_row("[dim]  Subtotal[/dim]", f"[red]${pnl['total_card_expenses']:,.2f}[/red]", key="subtotal-cards")
+        table.add_row("", "", key="spacer-3")
+
+        # Net line
+        net = pnl["net"]
+        net_color = "green" if net >= 0 else "red"
+        net_sign = "" if net >= 0 else "-"
+        table.add_row(
+            "[bold]NET PROFIT / LOSS[/bold]",
+            f"[{net_color} bold]{net_sign}${abs(net):,.2f}[/{net_color} bold]",
+            key="net-total",
+        )
+
     def _toast(self, message: str) -> None:
         self.notify(message, timeout=4)
 
@@ -647,6 +898,9 @@ class FintrakApp(App):
 
     def action_tab_imports(self) -> None:
         self.query_one(TabbedContent).active = "tab-imports"
+
+    def action_tab_pnl(self) -> None:
+        self.query_one(TabbedContent).active = "tab-pnl"
 
     # ── Events ────────────────────────────────────────────────────────────
 
@@ -698,6 +952,58 @@ class FintrakApp(App):
         self.query_one("#txn-date-from", Input).value = ""
         self.query_one("#txn-date-to", Input).value = ""
         self._refresh_transactions()
+
+    @on(Select.Changed, "#pnl-month-select")
+    def on_pnl_month_changed(self, event: Select.Changed) -> None:
+        val = str(event.value) if event.value != Select.BLANK else ""
+        if val and val != self.pnl_month:
+            self.pnl_month = val
+            self._refresh_pnl()
+
+    @on(Button.Pressed, "#btn-add-income")
+    def on_add_income(self) -> None:
+        def on_dismiss(result: str) -> None:
+            if result:
+                self._toast(result)
+                self._refresh_pnl()
+        self.push_screen(RecurringItemModal(item_type="income"), callback=on_dismiss)
+
+    @on(Button.Pressed, "#btn-add-expense")
+    def on_add_expense(self) -> None:
+        def on_dismiss(result: str) -> None:
+            if result:
+                self._toast(result)
+                self._refresh_pnl()
+        self.push_screen(RecurringItemModal(item_type="expense"), callback=on_dismiss)
+
+    @on(DataTable.RowSelected, "#pnl-table")
+    def on_pnl_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.row_key is None:
+            return
+        key = event.row_key.value
+        if not key or not key.startswith("item-"):
+            return
+        item_id = int(key.split("-", 1)[1])
+        conn = get_connection()
+        item = get_recurring_item_by_id(conn, item_id)
+        conn.close()
+        if not item:
+            return
+
+        def on_dismiss(result: str) -> None:
+            if result:
+                self._toast(result)
+                self._refresh_pnl()
+
+        self.push_screen(
+            RecurringItemModal(
+                item_id=item["id"],
+                name=item["name"],
+                amount=str(item["amount"]),
+                item_type=item["type"],
+            ),
+            callback=on_dismiss,
+        )
 
     @on(DataTable.RowSelected, "#import-table")
     def on_import_selected(self, event: DataTable.RowSelected) -> None:

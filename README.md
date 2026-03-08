@@ -8,8 +8,10 @@ Personal finance CLI toolkit for tracking credit card spending via CSV imports.
 - **Auto-detect** card format based on column headers
 - **Deduplicate** transactions automatically on re-import
 - **Spending summaries** with breakdowns by category and top merchants
+- **Profit & Loss tracking** with configurable recurring income and expenses
 - **Undo imports** to cleanly revert mistakes
 - **Interactive TUI** for browsing and filtering transactions
+- **Wildcard search** — use `*` in description filters (e.g. `AMAZON*`)
 - All data stored locally in SQLite (`~/.fintrak/fintrak.db`)
 
 ## Installation
@@ -67,13 +69,36 @@ fintrak summary --card 4321 --month 2025-12
 
 Formats are auto-detected from CSV headers. If your statement doesn't match a known profile, you'll get an error listing the columns found.
 
+## Profit & Loss
+
+The TUI includes a P&L tab for monthly profit/loss tracking. It combines:
+
+- **Recurring income** — configurable sources (e.g. salary, freelance)
+- **Recurring expenses** — configurable fixed costs (e.g. rent, HOA, internet, utilities)
+- **Credit card spending** — pulled automatically from imported transactions, broken down per card
+
+Use the "Add Income" and "Add Expense" buttons to configure recurring items. Click any recurring item row to edit or delete it. Select a month from the dropdown to view historical P&L.
+
 ## Data Storage
 
-All data lives in `~/.fintrak/fintrak.db` (created automatically on first use). Three tables:
+All data lives in `~/.fintrak/fintrak.db` (created automatically on first use). Four tables:
 
 - **cards** — registered cards (identified by last 4 digits)
 - **transactions** — all imported transactions, deduplicated by `(card_id, date, description, amount)`
 - **imports** — import history for auditing and undo support
+- **recurring_items** — configured recurring income and expense entries for P&L
+
+## TUI Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `1` | Dashboard tab |
+| `2` | Transactions tab |
+| `3` | Imports tab |
+| `4` | P&L tab |
+| `i` | Import CSV |
+| `r` | Refresh data |
+| `q` | Quit |
 
 ## Amount Convention
 

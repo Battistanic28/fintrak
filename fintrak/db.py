@@ -44,6 +44,15 @@ def _create_tables(conn):
             created_at  TEXT DEFAULT (datetime('now')),
             UNIQUE(card_id, date, description, amount)
         );
+
+        CREATE TABLE IF NOT EXISTS recurring_items (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            amount      REAL NOT NULL,
+            type        TEXT NOT NULL CHECK(type IN ('income', 'expense')),
+            created_at  TEXT DEFAULT (datetime('now')),
+            updated_at  TEXT DEFAULT (datetime('now'))
+        );
     """)
     conn.commit()
 
@@ -146,6 +155,60 @@ def get_categories(conn):
         "SELECT DISTINCT category FROM transactions WHERE category IS NOT NULL ORDER BY category"
     ).fetchall()
     return [r["category"] for r in rows]
+
+
+def add_recurring_item(conn, name, amount, item_type):
+    cur = conn.execute(
+        "INSERT INTO recurring_items (name, amount, type) VALUES (?, ?, ?)",
+        (name, amount, item_type),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_recurring_item(conn, item_id, name, amount, item_type):
+    conn.execute(
+        "UPDATE recurring_items SET name = ?, amount = ?, type = ?, updated_at = datetime('now') WHERE id = ?",
+        (name, amount, item_type, item_id),
+    )
+    conn.commit()
+
+
+def delete_recurring_item(conn, item_id):
+    conn.execute("DELETE FROM recurring_items WHERE id = ?", (item_id,))
+    conn.commit()
+
+
+def get_recurring_items(conn, item_type=None):
+    if item_type:
+        return conn.execute(
+            "SELECT * FROM recurring_items WHERE type = ? ORDER BY name", (item_type,)
+        ).fetchall()
+    return conn.execute("SELECT * FROM recurring_items ORDER BY type, name").fetchall()
+
+
+def get_recurring_item_by_id(conn, item_id):
+    return conn.execute(
+        "SELECT * FROM recurring_items WHERE id = ?", (item_id,)
+    ).fetchone()
+
+
+def get_monthly_card_spending(conn, month):
+    return conn.execute(
+        """SELECT c.last4 AS card_last4, SUM(t.amount) AS total_spent
+           FROM transactions t JOIN cards c ON t.card_id = c.id
+           WHERE t.amount > 0 AND strftime('%Y-%m', t.date) = ?
+           GROUP BY c.last4
+           ORDER BY total_spent DESC""",
+        (month,),
+    ).fetchall()
+
+
+def get_available_months(conn):
+    rows = conn.execute(
+        "SELECT DISTINCT strftime('%Y-%m', date) AS month FROM transactions ORDER BY month DESC"
+    ).fetchall()
+    return [r["month"] for r in rows]
 
 
 def get_transactions(conn, card_id=None, month=None, category=None, description=None, date_from=None, date_to=None):
