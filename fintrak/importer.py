@@ -29,6 +29,7 @@ PROFILES = {
             "date": "Date",
             "description": "Description",
             "amount": "Amount",
+            "category": "Category",
         },
         "negate": False,  # Amex: positive = charge
     },
