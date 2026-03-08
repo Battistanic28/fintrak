@@ -4,7 +4,7 @@ from pathlib import Path
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button, DataTable, Footer, Header, Input, Label,
@@ -16,15 +16,16 @@ from textual_autocomplete import AutoComplete, DropdownItem
 from fintrak.db import (
     get_connection, add_card, get_cards, get_card_by_last4,
     create_import, finalize_import, insert_transactions,
-    get_transactions, get_earliest_transaction_date,
+    get_transactions,
     get_categories, get_descriptions,
     get_imports, get_import_by_id, delete_import,
     add_recurring_item, update_recurring_item, delete_recurring_item,
     get_recurring_items, get_recurring_item_by_id,
-    get_monthly_card_spending, get_available_months,
+    get_monthly_card_spending, get_monthly_category_spending,
+    get_available_months,
 )
 from fintrak.importer import parse_csv
-from fintrak.analysis import spending_summary, by_category, top_merchants, profit_loss
+from fintrak.analysis import profit_loss, expense_breakdown
 
 
 # ── Import Modal ──────────────────────────────────────────────────────────────
@@ -336,60 +337,57 @@ class StatCard(Static):
             pass
 
 
-# ── Category Bar ──────────────────────────────────────────────────────────────
+# ── Spending Chart ────────────────────────────────────────────────────────────
 
-class CategoryBar(Static):
-    DEFAULT_CSS = """
-    CategoryBar {
-        height: 1;
-        margin: 0 1;
-    }
-    """
+class SpendingChart(Static):
+    MAX_ITEMS = 10
+    COLORS = [
+        "red", "blue", "green", "yellow", "cyan",
+        "magenta", "bright_red", "bright_blue",
+        "bright_green", "bright_yellow", "white",
+    ]
 
-    def __init__(self, name_: str, total: float, pct: float) -> None:
-        super().__init__()
-        self._cat_name = name_
-        self._total = total
-        self._pct = pct
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._data: list[dict] = []
+
+    def update_data(self, data: list[dict]) -> None:
+        self._data = data
+        self.refresh()
 
     def render(self) -> str:
-        bar_width = int(self._pct * 30)
-        bar = "█" * bar_width + "░" * (30 - bar_width)
-        return f"{self._cat_name:<20} [red]{bar}[/red] ${self._total:>10,.2f}"
+        if not self._data:
+            return "[bold]Expense Breakdown[/bold]\n\n[dim]No expense data[/dim]"
+
+        total = sum(d["amount"] for d in self._data)
+        if total == 0:
+            return "[bold]Expense Breakdown[/bold]\n\n[dim]No expense data[/dim]"
+
+        items = self._data[:self.MAX_ITEMS]
+        if len(self._data) > self.MAX_ITEMS:
+            other_total = sum(d["amount"] for d in self._data[self.MAX_ITEMS:])
+            items = items + [{"label": "Other", "amount": other_total}]
+
+        lines = ["[bold]Expense Breakdown[/bold]", ""]
+        bar_width = 25
+
+        for i, item in enumerate(items):
+            color = self.COLORS[i % len(self.COLORS)]
+            pct = item["amount"] / total
+            bar_len = max(1, int(pct * bar_width))
+            bar = "\u2588" * bar_len + "\u2591" * (bar_width - bar_len)
+            label = item["label"][:18]
+            lines.append(
+                f"[{color}]\u25cf[/{color}] {label:<18} [{color}]{bar}[/{color}] {pct * 100:5.1f}%  ${item['amount']:>10,.2f}"
+            )
+
+        lines.append("")
+        lines.append(f"  {'Total':<18} {'':<{bar_width}}         ${total:>10,.2f}")
+
+        return "\n".join(lines)
 
 
-# ── Main App ─────────────────────────────────────────────────────────────────
-
-class DateRangeFilter(Static):
-    DEFAULT_CSS = """
-    DateRangeFilter {
-        height: 3;
-        margin: 0 1;
-    }
-    DateRangeFilter > Horizontal {
-        height: 3;
-        align: left middle;
-    }
-    DateRangeFilter .range-label {
-        width: auto;
-        height: 3;
-        content-align: left middle;
-        margin-right: 2;
-    }
-    DateRangeFilter Button {
-        min-width: 6;
-        height: 3;
-        margin: 0 1 0 0;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Horizontal():
-            yield Label("", id="date-range-label", classes="range-label")
-            yield Button("MTD", id="btn-mtd", variant="primary")
-            yield Button("YTD", id="btn-ytd", variant="default")
-            yield Button("All", id="btn-all", variant="default")
-
+# ── Transaction Filters ──────────────────────────────────────────────────────
 
 class TransactionFilters(Static):
     DEFAULT_CSS = """
@@ -458,6 +456,8 @@ class TransactionFilters(Static):
             yield Button("Clear", variant="default", id="btn-txn-clear")
 
 
+# ── Main App ─────────────────────────────────────────────────────────────────
+
 class FintrakApp(App):
     CSS = """
     Screen {
@@ -469,25 +469,7 @@ class FintrakApp(App):
         margin-bottom: 0;
         margin-top: 1;
     }
-    #stats-row {
-        height: 5;
-        margin: 1 1 0 1;
-    }
-    #dashboard-content {
-        margin: 0 1;
-    }
-    #categories-box {
-        height: auto;
-        max-height: 14;
-        border: tall $accent;
-        margin: 1 0;
-        padding: 1;
-    }
-    #categories-box > .category-title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    #txn-table, #import-table, #recent-table, #income-table, #expense-table {
+    #txn-table, #import-table, #income-table, #expense-table {
         height: 1fr;
         margin: 1;
     }
@@ -505,9 +487,6 @@ class FintrakApp(App):
         padding: 0 1;
         text-align: right;
         text-style: bold;
-    }
-    .stat-spent {
-        border: tall $error;
     }
     #pnl-month-row {
         height: 3;
@@ -537,8 +516,17 @@ class FintrakApp(App):
     .stat-net {
         border: tall $warning;
     }
-    #pnl-table {
+    #pnl-content {
         height: 1fr;
+    }
+    #pnl-chart {
+        width: 1fr;
+        border: tall $accent;
+        padding: 1;
+        margin: 1;
+    }
+    #pnl-table {
+        width: 1fr;
         margin: 1;
     }
     #txn-total {
@@ -563,21 +551,15 @@ class FintrakApp(App):
         Binding("i", "import_csv", "Import CSV"),
         Binding("r", "refresh_data", "Refresh"),
         Binding("q", "quit", "Quit"),
-        Binding("1", "tab_dashboard", "Dashboard", show=False),
-        Binding("2", "tab_pnl", "P&L", show=False),
-        Binding("3", "tab_income", "Income", show=False),
-        Binding("4", "tab_expenses", "Key Expenses", show=False),
-        Binding("5", "tab_transactions", "Transactions", show=False),
-        Binding("6", "tab_imports", "Imports", show=False),
+        Binding("1", "tab_pnl", "P&L", show=False),
+        Binding("2", "tab_income", "Income", show=False),
+        Binding("3", "tab_expenses", "Key Expenses", show=False),
+        Binding("4", "tab_transactions", "Transactions", show=False),
+        Binding("5", "tab_imports", "Imports", show=False),
     ]
-
-    FILTER_MTD = "mtd"
-    FILTER_YTD = "ytd"
-    FILTER_ALL = "all"
 
     def __init__(self) -> None:
         super().__init__()
-        self.active_filter = self.FILTER_MTD
         self.txn_card_filter: str = ""
         self.txn_category_filter: str = ""
         self.txn_desc_filter: str = ""
@@ -585,45 +567,9 @@ class FintrakApp(App):
         self.txn_date_to: str = ""
         self.pnl_month: str = datetime.now().strftime("%Y-%m")
 
-    def _get_filter_month(self) -> str:
-        now = datetime.now()
-        if self.active_filter == self.FILTER_MTD:
-            return now.strftime("%Y-%m")
-        elif self.active_filter == self.FILTER_YTD:
-            return now.strftime("%Y")
-        return "all"
-
-    def _get_date_range_text(self) -> str:
-        now = datetime.now()
-        if self.active_filter == self.FILTER_MTD:
-            start = now.replace(day=1).strftime("%b %d, %Y")
-            end = now.strftime("%b %d, %Y")
-            return f"[bold]Month to Date[/bold]  {start} — {end}"
-        elif self.active_filter == self.FILTER_YTD:
-            start = now.replace(month=1, day=1).strftime("%b %d, %Y")
-            end = now.strftime("%b %d, %Y")
-            return f"[bold]Year to Date[/bold]  {start} — {end}"
-        conn = get_connection()
-        earliest = get_earliest_transaction_date(conn)
-        conn.close()
-        if earliest:
-            start = datetime.strptime(earliest, "%Y-%m-%d").strftime("%b %d, %Y")
-            end = now.strftime("%b %d, %Y")
-            return f"[bold]All Time[/bold]  {start} — {end}"
-        return "[bold]All Time[/bold]"
-
     def compose(self) -> ComposeResult:
         yield Header()
-        with TabbedContent("Dashboard", "Income", "Key Expenses", "P&L", "Transactions", "Imports", id="tabs"):
-            with TabPane("Dashboard", id="tab-dashboard"):
-                yield DateRangeFilter(id="dash-filter")
-                with Horizontal(id="stats-row"):
-                    yield StatCard("Total Spent", "$0.00", "stat-spent")
-                    yield StatCard("Transactions", "0")
-                with VerticalScroll(id="dashboard-content"):
-                    with Vertical(id="categories-box"):
-                        yield Static("Spending by Category", classes="category-title")
-                    yield DataTable(id="recent-table")
+        with TabbedContent("P&L", "Income", "Key Expenses", "Transactions", "Imports", id="tabs"):
             with TabPane("P&L", id="tab-pnl"):
                 with Horizontal(id="pnl-month-row"):
                     yield Label("Month:")
@@ -638,7 +584,9 @@ class FintrakApp(App):
                     yield StatCard("Total Income", "$0.00", "stat-income")
                     yield StatCard("Total Expenses", "$0.00", "stat-expenses")
                     yield StatCard("Net P/L", "$0.00", "stat-net")
-                yield DataTable(id="pnl-table")
+                with Horizontal(id="pnl-content"):
+                    yield DataTable(id="pnl-table")
+                    yield SpendingChart(id="pnl-chart")
             with TabPane("Income", id="tab-income"):
                 with Horizontal(id="income-buttons"):
                     yield Button("Add Income", variant="success", id="btn-add-income")
@@ -660,7 +608,6 @@ class FintrakApp(App):
 
     def on_mount(self) -> None:
         self._setup_tables()
-        self._update_filter_buttons()
         self._populate_txn_filters()
         self._mount_autocomplete()
         self._refresh_all()
@@ -681,10 +628,9 @@ class FintrakApp(App):
         return self._desc_candidates
 
     def _setup_tables(self) -> None:
-        for table_id in ("txn-table", "recent-table"):
-            table = self.query_one(f"#{table_id}", DataTable)
-            table.cursor_type = "row"
-            table.add_columns("Date", "Card", "Description", "Category", "Amount")
+        txn_table = self.query_one("#txn-table", DataTable)
+        txn_table.cursor_type = "row"
+        txn_table.add_columns("Date", "Card", "Description", "Category", "Amount")
 
         imp_table = self.query_one("#import-table", DataTable)
         imp_table.cursor_type = "row"
@@ -701,14 +647,6 @@ class FintrakApp(App):
         pnl_table = self.query_one("#pnl-table", DataTable)
         pnl_table.cursor_type = "row"
         pnl_table.add_columns("Line Item", "Amount")
-
-    def _update_filter_buttons(self) -> None:
-        range_text = self._get_date_range_text()
-        dash_filter = self.query_one("#dash-filter", DateRangeFilter)
-        dash_filter.query_one("#date-range-label", Label).update(range_text)
-        for btn_id, filter_val in [("#btn-mtd", self.FILTER_MTD), ("#btn-ytd", self.FILTER_YTD), ("#btn-all", self.FILTER_ALL)]:
-            btn = dash_filter.query_one(btn_id, Button)
-            btn.variant = "primary" if self.active_filter == filter_val else "default"
 
     def _populate_txn_filters(self) -> None:
         conn = get_connection()
@@ -735,7 +673,6 @@ class FintrakApp(App):
 
     def _refresh_all(self) -> None:
         self._populate_txn_filters()
-        self._refresh_dashboard()
         self._refresh_income()
         self._refresh_expenses()
         self._refresh_transactions()
@@ -784,47 +721,6 @@ class FintrakApp(App):
             f"{len(items)} items    Total: [red]${total:,.2f}[/red]"
         )
 
-    def _refresh_dashboard(self) -> None:
-        conn = get_connection()
-        txns = get_transactions(conn, month=self._get_filter_month())
-        conn.close()
-
-        stat_cards = self.query(StatCard)
-        stats = spending_summary(txns)
-        if stats and len(list(stat_cards)) >= 2:
-            cards_list = list(self.query(StatCard))
-            cards_list[0].update_stat("Total Spent", f"[red]${stats['total_spent']:,.2f}[/red]")
-            cards_list[1].update_stat("Transactions", str(stats["transaction_count"]))
-        else:
-            cards_list = list(self.query(StatCard))
-            if len(cards_list) >= 2:
-                cards_list[0].update_stat("Total Spent", "$0.00")
-                cards_list[1].update_stat("Transactions", "0")
-
-        cats_box = self.query_one("#categories-box", Vertical)
-        for bar in self.query(CategoryBar):
-            bar.remove()
-
-        cats = by_category(txns)
-        if cats:
-            max_total = cats[0]["total"]
-            for cat in cats[:8]:
-                pct = cat["total"] / max_total if max_total else 0
-                cats_box.mount(CategoryBar(cat["category"], cat["total"], pct))
-
-        recent = self.query_one("#recent-table", DataTable)
-        recent.clear()
-        for t in txns[:20]:
-            amt = t["amount"]
-            amt_str = f"${amt:,.2f}" if amt >= 0 else f"-${abs(amt):,.2f}"
-            recent.add_row(
-                t["date"],
-                f"****{t['card_last4']}",
-                t["description"][:40],
-                t["category"] or "—",
-                amt_str,
-            )
-
     def _refresh_transactions(self) -> None:
         conn = get_connection()
         card_id = int(self.txn_card_filter) if self.txn_card_filter else None
@@ -850,7 +746,7 @@ class FintrakApp(App):
                 t["date"],
                 f"****{t['card_last4']}",
                 t["description"][:50],
-                t["category"] or "—",
+                t["category"] or "\u2014",
                 amt_str,
             )
 
@@ -872,7 +768,7 @@ class FintrakApp(App):
                 str(imp["id"]),
                 f"****{imp['card_last4']}",
                 imp["filename"],
-                imp["profile"] or "—",
+                imp["profile"] or "\u2014",
                 str(imp["inserted"]),
                 str(imp["skipped"]),
                 imp["created_at"],
@@ -898,11 +794,12 @@ class FintrakApp(App):
 
         items = get_recurring_items(conn)
         card_spending = get_monthly_card_spending(conn, self.pnl_month)
+        cat_spending = get_monthly_category_spending(conn, self.pnl_month)
         conn.close()
 
         pnl = profit_loss(items, card_spending)
 
-        # Update stat cards in the P&L tab
+        # Update stat cards
         pnl_stats = list(self.query_one("#pnl-stats-row", Horizontal).query(StatCard))
         if len(pnl_stats) >= 3:
             pnl_stats[0].update_stat("Total Income", f"[green]${pnl['total_income']:,.2f}[/green]")
@@ -912,32 +809,32 @@ class FintrakApp(App):
             net_sign = "" if net >= 0 else "-"
             pnl_stats[2].update_stat("Net P/L", f"[{net_color}]{net_sign}${abs(net):,.2f}[/{net_color}]")
 
+        # Update expense breakdown chart
+        breakdown = expense_breakdown(items, cat_spending)
+        self.query_one("#pnl-chart", SpendingChart).update_data(breakdown)
+
         # Populate P&L table
         table = self.query_one("#pnl-table", DataTable)
         table.clear()
 
-        # Income section
         table.add_row("[bold cyan]INCOME[/bold cyan]", "", key="header-income")
         for item in pnl["income_items"]:
-            table.add_row(f"  {item['name']}", f"[green]${item['amount']:,.2f}[/green]", key=f"item-{item['id']}")
+            table.add_row(f"  {item['name']}", f"[green]${item['amount']:,.2f}[/green]", key=f"income-{item['id']}")
         table.add_row("[dim]  Subtotal[/dim]", f"[green bold]${pnl['total_income']:,.2f}[/green bold]", key="subtotal-income")
         table.add_row("", "", key="spacer-1")
 
-        # Recurring expenses section
-        table.add_row("[bold cyan]EXPENSES — Recurring[/bold cyan]", "", key="header-recurring")
+        table.add_row("[bold cyan]EXPENSES \u2014 Recurring[/bold cyan]", "", key="header-recurring")
         for item in pnl["recurring_expense_items"]:
-            table.add_row(f"  {item['name']}", f"[red]${item['amount']:,.2f}[/red]", key=f"item-{item['id']}")
+            table.add_row(f"  {item['name']}", f"[red]${item['amount']:,.2f}[/red]", key=f"expense-{item['id']}")
         table.add_row("[dim]  Subtotal[/dim]", f"[red]${pnl['total_recurring_expenses']:,.2f}[/red]", key="subtotal-recurring")
         table.add_row("", "", key="spacer-2")
 
-        # Card expenses section
-        table.add_row("[bold cyan]EXPENSES — Credit Cards[/bold cyan]", "", key="header-cards")
+        table.add_row("[bold cyan]EXPENSES \u2014 Credit Cards[/bold cyan]", "", key="header-cards")
         for item in pnl["card_expense_items"]:
             table.add_row(f"  {item['card']}", f"[red]${item['amount']:,.2f}[/red]", key=f"card-{item['card']}")
         table.add_row("[dim]  Subtotal[/dim]", f"[red]${pnl['total_card_expenses']:,.2f}[/red]", key="subtotal-cards")
         table.add_row("", "", key="spacer-3")
 
-        # Net line
         net = pnl["net"]
         net_color = "green" if net >= 0 else "red"
         net_sign = "" if net >= 0 else "-"
@@ -964,17 +861,14 @@ class FintrakApp(App):
         self._refresh_all()
         self._toast("Data refreshed")
 
-    def action_tab_dashboard(self) -> None:
-        self.query_one(TabbedContent).active = "tab-dashboard"
+    def action_tab_pnl(self) -> None:
+        self.query_one(TabbedContent).active = "tab-pnl"
 
     def action_tab_income(self) -> None:
         self.query_one(TabbedContent).active = "tab-income"
 
     def action_tab_expenses(self) -> None:
         self.query_one(TabbedContent).active = "tab-expenses"
-
-    def action_tab_pnl(self) -> None:
-        self.query_one(TabbedContent).active = "tab-pnl"
 
     def action_tab_transactions(self) -> None:
         self.query_one(TabbedContent).active = "tab-transactions"
@@ -983,23 +877,6 @@ class FintrakApp(App):
         self.query_one(TabbedContent).active = "tab-imports"
 
     # ── Events ────────────────────────────────────────────────────────────
-
-    @on(Button.Pressed, "#btn-mtd")
-    def on_filter_mtd(self) -> None:
-        self._set_filter(self.FILTER_MTD)
-
-    @on(Button.Pressed, "#btn-ytd")
-    def on_filter_ytd(self) -> None:
-        self._set_filter(self.FILTER_YTD)
-
-    @on(Button.Pressed, "#btn-all")
-    def on_filter_all(self) -> None:
-        self._set_filter(self.FILTER_ALL)
-
-    def _set_filter(self, filter_val: str) -> None:
-        self.active_filter = filter_val
-        self._update_filter_buttons()
-        self._refresh_dashboard()
 
     @on(Select.Changed, "#txn-card-filter")
     def on_txn_card_changed(self, event: Select.Changed) -> None:

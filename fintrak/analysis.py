@@ -75,6 +75,18 @@ def profit_loss(recurring_items, card_spending_rows):
     }
 
 
+def expense_breakdown(recurring_items, category_spending_rows):
+    """Build expense breakdown: non-CC recurring items + card category spending."""
+    slices = []
+    for item in recurring_items:
+        if item["type"] == "expense" and not item["paid_via_cc"]:
+            slices.append({"label": item["name"], "amount": round(item["amount"], 2)})
+    for row in category_spending_rows:
+        slices.append({"label": row["category"], "amount": round(row["total"], 2)})
+    slices.sort(key=lambda x: x["amount"], reverse=True)
+    return slices
+
+
 def _to_dataframe(transactions):
     rows = [dict(t) for t in transactions]
     df = pd.DataFrame(rows)

@@ -210,6 +210,18 @@ def get_monthly_card_spending(conn, month):
     ).fetchall()
 
 
+def get_monthly_category_spending(conn, month):
+    return conn.execute(
+        """SELECT COALESCE(t.category, 'Uncategorized') AS category,
+                  SUM(t.amount) AS total
+           FROM transactions t
+           WHERE t.amount > 0 AND strftime('%Y-%m', t.date) = ?
+           GROUP BY COALESCE(t.category, 'Uncategorized')
+           ORDER BY total DESC""",
+        (month,),
+    ).fetchall()
+
+
 def get_available_months(conn):
     rows = conn.execute(
         "SELECT DISTINCT strftime('%Y-%m', date) AS month FROM transactions ORDER BY month DESC"
