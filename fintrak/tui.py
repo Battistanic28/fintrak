@@ -40,7 +40,7 @@ class ImportModal(ModalScreen[str]):
     ImportModal > #import-dialog {
         width: 70;
         height: auto;
-        max-height: 20;
+        max-height: 30;
         border: thick $accent;
         background: $surface;
         padding: 1 2;

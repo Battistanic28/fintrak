@@ -14,7 +14,7 @@ PROFILES = {
         "negate": True,  # Chase: negative = charge, we want positive = charge
     },
     "capital_one": {
-        "columns": {"Transaction Date", "Posted Date", "Card No.", "Description", "Category", "Debit", "Credit"},
+        "columns": {"Transaction Date", "Posted Date", "Card No.", "Description", "Category", "Debit"},
         "map": {
             "date": "Transaction Date",
             "description": "Description",
